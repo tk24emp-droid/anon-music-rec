@@ -156,7 +156,7 @@ function App() {
 
   // Model states per provider
   const [vertexModel, setVertexModel] = useState('gemini-2.5-flash');
-  const [openaiModel, setOpenaiModel] = useState('gpt-4o-mini');
+  const [openaiModel, setOpenaiModel] = useState('gpt-5-mini');
 
   const [showSettings, setShowSettings] = useState(false);
 
@@ -498,9 +498,9 @@ function App() {
               </select>
             ) : (
               <select id="modelSelect" value={openaiModel} onChange={e => setOpenaiModel(e.target.value)} style={selectStyle}>
-                <option value="gpt-4o-mini">gpt-4o-mini {lang === 'ja' ? '(推奨・高速)' : '(Rec. / Fast)'}</option>
-                <option value="gpt-4o">gpt-4o {lang === 'ja' ? '(高性能)' : '(High Capability)'}</option>
-                <option value="o1-mini">o1-mini</option>
+                <option value="gpt-5-mini">gpt-5-mini {lang === 'ja' ? '(推奨・高速)' : '(Rec. / Fast)'}</option>
+                <option value="gpt-5">gpt-5 {lang === 'ja' ? '(高性能)' : '(High Capability)'}</option>
+                <option value="gpt-5.4">gpt-5.4</option>
               </select>
             )}
           </div>
