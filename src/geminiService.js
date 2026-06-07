@@ -1,24 +1,23 @@
 /**
- * Vertex AI Proxy Service Client
- * Redirects frontend API calls to local Node.js Express server which interfaces with Google Cloud Vertex AI SDK.
+ * Vertex AI / OpenAI Proxy Service Client
+ * Redirects frontend API calls to local Node.js Express server which interfaces with AI SDKs.
  */
 
 /**
- * Validates the connection to Vertex AI via proxy.
- * Key argument is kept to match existing App.jsx state but is not used directly.
+ * Validates the connection to the AI provider.
  */
-export async function validateApiKey(apiKey, modelName = "gemini-2.5-flash") {
+export async function validateApiKey(provider, apiKey, modelName = "gemini-2.5-flash") {
   const response = await fetch('/api/validate', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({ modelName })
+    body: JSON.stringify({ provider, apiKey, modelName })
   });
 
   if (!response.ok) {
     const errData = await response.json();
-    throw new Error(errData.error || 'Vertex AIの接続検証に失敗しました。gcloud auth login/gcloud auth application-default login が成功しているかご確認ください。');
+    throw new Error(errData.error || '接続検証に失敗しました。認証情報をご確認ください。');
   }
 
   const data = await response.json();
@@ -26,7 +25,7 @@ export async function validateApiKey(apiKey, modelName = "gemini-2.5-flash") {
 }
 
 /**
- * LLM 1: Generates an anonymous feature description using Vertex AI.
+ * LLM 1: Generates an anonymous feature description.
  */
 export async function generateAnonymousDescription(apiKey, input, options) {
   const response = await fetch('/api/extract', {
@@ -35,6 +34,8 @@ export async function generateAnonymousDescription(apiKey, input, options) {
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
+      provider: options.provider,
+      apiKey: apiKey,
       input,
       filters: {
         hideGender: options.hideGender,
@@ -70,6 +71,8 @@ export async function predictSongsFromDescription(apiKey, description, options) 
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
+      provider: options.provider,
+      apiKey: apiKey,
       description,
       recommendCount: options.recommendCount,
       useWebSearch: options.useWebSearch,
@@ -89,13 +92,15 @@ export async function predictSongsFromDescription(apiKey, description, options) 
 /**
  * LLM 3: Double checks if the predicted song is too close or same as the original input.
  */
-export async function verifyAndFilterSong(apiKey, originalInput, prediction, modelName = "gemini-2.5-flash") {
+export async function verifyAndFilterSong(provider, apiKey, originalInput, prediction, modelName = "gemini-2.5-flash") {
   const response = await fetch('/api/verify', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
+      provider,
+      apiKey,
       originalInput,
       prediction,
       modelName

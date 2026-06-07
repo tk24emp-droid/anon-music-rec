@@ -12,17 +12,18 @@ import {
 const T = {
   ja: {
     subtitle: 'あなたの好きな曲・歌手の「音楽的特徴」だけから、新たな類似曲を連想して推薦します',
-    settingsTitle: 'Vertex AI 接続設定',
-    settingsDesc: '本アプリは Google Cloud Vertex AI を使用して音楽推薦を行います。ローカルの認証情報（gcloud auth）を使用するため、通常 API キーの入力は不要です。',
+    settingsTitle: 'AI 接続設定',
+    settingsDesc: '接続するAIサービスと使用モデル、APIキーを設定します。',
+    providerLabel: 'AI プロバイダー',
     modelLabel: '使用する AI モデル',
     verifyBtn: '保存して検証',
     verifying: '検証中...',
-    clearKey: 'キーをクリア',
+    clearKey: '設定をクリア',
     close: '閉じる',
-    connectedStatus: 'Vertex AI 接続状態: 良好',
+    connectedStatus: (p) => `${p === 'openai' ? 'OpenAI' : 'Vertex AI'} 接続状態: 良好`,
     settingsBtn: '設定',
-    validationFail: 'Vertex AI への接続検証に失敗しました。',
-    validationError: '接続検証中にエラーが発生しました。gcloud のログイン状態やプロジェクト権限をご確認ください。',
+    validationFail: '接続検証に失敗しました。キーやモデルをご確認ください。',
+    validationError: '接続検証中にエラーが発生しました。設定情報をご確認ください。',
     inputLabel: '好きな歌手名、または曲名',
     inputPlaceholder: '例: あいみょん - マリーゴールド',
     hideTitle: '匿名化フィルター設定（隠す）',
@@ -38,7 +39,8 @@ const T = {
       lyrics:  { label: '歌詞内容',    hideDesc: '歌詞のテーマ/世界観などの伏せ',   empDesc: '歌詞のテーマや物語性を強調' },
     },
     webSearchLabel: 'Google 検索連携',
-    webSearchDesc:  'Web 検索で最新・より的確な音楽特徴を参照',
+    webSearchDesc:  'Web 検索で最新・より的確な音楽特徴を参照（※Vertex AIでのみ有効）',
+    webSearchOpenAINote: '※OpenAI使用時はWeb検索は利用できません',
     countLabel: '推薦候補数',
     startBtn: '音楽推薦を開始する',
     runningBtn: '推薦処理を実行中...',
@@ -66,24 +68,25 @@ const T = {
     removedReason: '入力内容（正解）と文字列が一致するため除外しました。',
     passedReason: '元ネタとの類似検証をパスしました。',
     llmRemovedFallback: '元のアーティストまたは曲と判定されました。',
-    footer: '© 2026 AnonMusicRec. Powered by Vertex AI & React',
+    footer: '© 2026 AnonMusicRec. Powered by Vertex AI / OpenAI & React',
     langToggle: 'English',
-    errorKeyMsg: '有効な Gemini API キーを入力してください。',
+    errorKeyMsg: '有効な API キーを入力するか、Vertex AI 接続を設定してください。',
     errorPipelineMsg: '推薦の処理中にエラーが発生しました。プロンプト制限やネットワークを確認してください。',
   },
   en: {
     subtitle: 'Recommend similar songs using only the musical characteristics of your favorites — no names required.',
-    settingsTitle: 'Vertex AI Connection',
-    settingsDesc: 'This app uses Google Cloud Vertex AI for music recommendations. Local credentials (gcloud auth) are used, so no API key is required.',
+    settingsTitle: 'AI Connection Settings',
+    settingsDesc: 'Configure your AI provider, model, and API keys.',
+    providerLabel: 'AI Provider',
     modelLabel: 'AI Model',
     verifyBtn: 'Save & Verify',
     verifying: 'Verifying...',
-    clearKey: 'Clear Key',
+    clearKey: 'Clear Settings',
     close: 'Close',
-    connectedStatus: 'Vertex AI: Connected',
+    connectedStatus: (p) => `${p === 'openai' ? 'OpenAI' : 'Vertex AI'} connected successfully`,
     settingsBtn: 'Settings',
-    validationFail: 'Failed to verify connection to Vertex AI.',
-    validationError: 'Connection error. Please check your gcloud login status and project permissions.',
+    validationFail: 'Failed to verify connection. Please check your credentials and model choice.',
+    validationError: 'Connection error. Please check your config details.',
     inputLabel: 'Favorite artist or song title',
     inputPlaceholder: 'e.g. Radiohead - Creep',
     hideTitle: 'Anonymize Filters (Hide)',
@@ -99,7 +102,8 @@ const T = {
       lyrics:  { label: 'Lyrics Content',   hideDesc: 'Hide lyrical themes & storytelling',  empDesc: 'Emphasize lyrical themes & narrative' },
     },
     webSearchLabel: 'Google Search Integration',
-    webSearchDesc:  'Use web search for up-to-date, more accurate music features',
+    webSearchDesc:  'Use web search for up-to-date, more accurate music features (Vertex AI only)',
+    webSearchOpenAINote: '*Google Search is not available with OpenAI',
     countLabel: 'Recommendation Count',
     startBtn: 'Start Music Recommendations',
     runningBtn: 'Processing...',
@@ -127,28 +131,36 @@ const T = {
     removedReason: 'String match with input (correct answer) — excluded.',
     passedReason: 'Passed near-miss verification.',
     llmRemovedFallback: 'Identified as same artist or song.',
-    footer: '© 2026 AnonMusicRec. Powered by Vertex AI & React',
+    footer: '© 2026 AnonMusicRec. Powered by Vertex AI / OpenAI & React',
     langToggle: '日本語',
-    errorKeyMsg: 'Please enter a valid Gemini API key.',
+    errorKeyMsg: 'Please enter a valid API key or configure Vertex AI connection.',
     errorPipelineMsg: 'An error occurred during processing. Check prompt limits and network.',
   }
 };
 
-// Attribute keys (order used to render checkboxes)
 const ATTR_KEYS = ['gender', 'members', 'genre', 'era', 'country', 'lyrics'];
 
 function App() {
   const [lang, setLang] = useState('ja');
   const t = T[lang];
 
-  // --- Settings ---
-  const [apiKey, setApiKey] = useState('');
+  // --- Core Settings States ---
+  const [provider, setProvider] = useState('vertex'); // 'vertex' | 'openai'
+  const [apiKey, setApiKey] = useState(''); // Vertex dummy key ('vertex-ai-mode')
+  const [openaiApiKey, setOpenaiApiKey] = useState(''); // OpenAI Real Key
+  const [showOpenaiKey, setShowOpenaiKey] = useState(false);
+
   const [isKeyValid, setIsKeyValid] = useState(null);
   const [isValidating, setIsValidating] = useState(false);
   const [validationError, setValidationError] = useState('');
-  const [selectedModel, setSelectedModel] = useState('gemini-2.5-flash');
+
+  // Model states per provider
+  const [vertexModel, setVertexModel] = useState('gemini-2.5-flash');
+  const [openaiModel, setOpenaiModel] = useState('gpt-4o-mini');
+
   const [showSettings, setShowSettings] = useState(false);
 
+  // User input states
   const [musicInput, setMusicInput] = useState('');
 
   // --- Filters (hide = anonymize) ---
@@ -166,7 +178,7 @@ function App() {
   const [useWebSearch, setUseWebSearch] = useState(true);
   const [recommendCount, setRecommendCount] = useState(5);
 
-  // --- Pipeline ---
+  // --- Pipeline States ---
   const [pipelineStatus, setPipelineStatus] = useState('idle');
   const [currentStep, setCurrentStep] = useState(0);
   const [errorMsg, setErrorMsg] = useState('');
@@ -176,16 +188,24 @@ function App() {
 
   // Init
   useEffect(() => {
-    const savedKey = localStorage.getItem('anon_music_api_key');
-    const savedModel = localStorage.getItem('anon_music_model');
+    const savedProvider = localStorage.getItem('anon_music_provider');
+    const savedVertexModel = localStorage.getItem('anon_music_vertex_model');
+    const savedOpenaiModel = localStorage.getItem('anon_music_openai_model');
+    const savedOpenaiKey = localStorage.getItem('anon_music_openai_key');
     const savedLang = localStorage.getItem('anon_music_lang');
-    if (savedModel) setSelectedModel(savedModel);
+
+    if (savedProvider) setProvider(savedProvider);
+    if (savedVertexModel) setVertexModel(savedVertexModel);
+    if (savedOpenaiModel) setOpenaiModel(savedOpenaiModel);
+    if (savedOpenaiKey) setOpenaiApiKey(savedOpenaiKey);
     if (savedLang) setLang(savedLang);
-    setApiKey(savedKey || 'vertex-ai-mode');
+
+    // Initial default dummy setup for Vertex AI proxy
+    setApiKey('vertex-ai-mode');
     setIsKeyValid(true);
   }, []);
 
-  // Persist lang
+  // Persist language
   const switchLang = () => {
     const next = lang === 'ja' ? 'en' : 'ja';
     setLang(next);
@@ -193,28 +213,42 @@ function App() {
   };
 
   // Verify connection
-  const handleSaveApiKey = async () => {
+  const handleSaveSettings = async () => {
     setIsValidating(true);
     setValidationError('');
     try {
-      const key = apiKey.trim() || 'vertex-ai-mode';
-      const isValid = await validateApiKey(key, selectedModel);
+      const activeKey = provider === 'openai' ? openaiApiKey.trim() : apiKey;
+      const activeModel = provider === 'openai' ? openaiModel : vertexModel;
+
+      const isValid = await validateApiKey(provider, activeKey, activeModel);
       setIsValidating(false);
       setIsKeyValid(isValid);
+
       if (isValid) {
-        localStorage.setItem('anon_music_api_key', key);
-        localStorage.setItem('anon_music_model', selectedModel);
+        localStorage.setItem('anon_music_provider', provider);
+        localStorage.setItem('anon_music_vertex_model', vertexModel);
+        localStorage.setItem('anon_music_openai_model', openaiModel);
+        if (provider === 'openai') {
+          localStorage.setItem('anon_music_openai_key', activeKey);
+        }
         setShowSettings(false);
       } else {
-        localStorage.removeItem('anon_music_api_key');
         setValidationError(t.validationFail);
       }
     } catch (err) {
       setIsValidating(false);
       setIsKeyValid(false);
-      localStorage.removeItem('anon_music_api_key');
       setValidationError(err.message || t.validationError);
     }
+  };
+
+  const handleClearSettings = () => {
+    localStorage.removeItem('anon_music_provider');
+    localStorage.removeItem('anon_music_openai_key');
+    setOpenaiApiKey('');
+    setProvider('vertex');
+    setIsKeyValid(true);
+    setShowSettings(true);
   };
 
   // Toggle helpers — mutually exclusive between hide & emphasize
@@ -252,17 +286,32 @@ function App() {
     setRawPredictions([]);
     setFilteringList([]);
 
+    const activeKey = provider === 'openai' ? openaiApiKey : apiKey;
+    const activeModel = provider === 'openai' ? openaiModel : vertexModel;
+
+    // Force disable web search if provider is OpenAI
+    const effectiveWebSearch = provider === 'openai' ? false : useWebSearch;
+
     try {
       // Step 1: Feature extraction
-      const features = await generateAnonymousDescription(apiKey, musicInput, {
-        ...filters, emphasize, useWebSearch, modelName: selectedModel, lang,
+      const features = await generateAnonymousDescription(activeKey, musicInput, {
+        ...filters,
+        emphasize,
+        useWebSearch: effectiveWebSearch,
+        modelName: activeModel,
+        provider,
+        lang,
       });
       setExtractedFeatures(features);
       setCurrentStep(2);
 
       // Step 2: Song prediction
-      const predictions = await predictSongsFromDescription(apiKey, features, {
-        recommendCount, useWebSearch, modelName: selectedModel, lang,
+      const predictions = await predictSongsFromDescription(activeKey, features, {
+        recommendCount,
+        useWebSearch: effectiveWebSearch,
+        modelName: activeModel,
+        provider,
+        lang,
       });
       setRawPredictions(predictions);
 
@@ -287,8 +336,11 @@ function App() {
           reason = t.removedReason;
         } else {
           try {
-            const v = await verifyAndFilterSong(apiKey, musicInput, song, selectedModel);
-            if (v.isTooClose) { isRemoved = true; reason = v.reason || t.llmRemovedFallback; }
+            const v = await verifyAndFilterSong(provider, activeKey, musicInput, song, activeModel);
+            if (v.isTooClose) { 
+              isRemoved = true; 
+              reason = v.reason || t.llmRemovedFallback; 
+            }
           } catch (err) { /* fall through */ }
         }
 
@@ -386,22 +438,77 @@ function App() {
             {isKeyValid && <button className="btn-secondary" onClick={() => setShowSettings(false)}>{t.close}</button>}
           </div>
           <p className="toggle-desc" style={{ marginBottom: '1.5rem', marginTop: '0.5rem' }}>{t.settingsDesc}</p>
-          {/* Hidden key input for vertex-ai mode */}
-          <div style={{ display: 'none' }}>
-            <input type="text" value={apiKey} onChange={e => setApiKey(e.target.value)} />
+          
+          {/* Provider Selection */}
+          <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+            <label>{t.providerLabel}</label>
+            <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
+              <button
+                type="button"
+                className={`btn-secondary ${provider === 'vertex' ? 'active' : ''}`}
+                style={{ flex: 1, backgroundColor: provider === 'vertex' ? 'rgba(255, 255, 255, 0.1)' : 'transparent', border: provider === 'vertex' ? '1.5px solid var(--color-secondary)' : '1.5px solid var(--border-color)' }}
+                onClick={() => setProvider('vertex')}
+              >
+                Google Vertex AI
+              </button>
+              <button
+                type="button"
+                className={`btn-secondary ${provider === 'openai' ? 'active' : ''}`}
+                style={{ flex: 1, backgroundColor: provider === 'openai' ? 'rgba(255, 255, 255, 0.1)' : 'transparent', border: provider === 'openai' ? '1.5px solid var(--color-secondary)' : '1.5px solid var(--border-color)' }}
+                onClick={() => setProvider('openai')}
+              >
+                OpenAI
+              </button>
+            </div>
           </div>
-          <div className="form-group">
+
+          {/* OpenAI Key Input */}
+          {provider === 'openai' && (
+            <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+              <label htmlFor="openaiKeyInput">OpenAI API Key</label>
+              <div className="input-wrapper" style={{ marginTop: '0.5rem' }}>
+                <input 
+                  id="openaiKeyInput"
+                  type={showOpenaiKey ? "text" : "password"} 
+                  value={openaiApiKey}
+                  placeholder="sk-proj-..."
+                  onChange={e => setOpenaiApiKey(e.target.value)}
+                  style={{ width: '100%', paddingRight: '2.5rem' }}
+                />
+                <button
+                  type="button"
+                  style={{ position: 'absolute', right: '0.8rem', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+                  onClick={() => setShowOpenaiKey(!showOpenaiKey)}
+                >
+                  {showOpenaiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Model Select */}
+          <div className="form-group" style={{ marginBottom: '1.5rem' }}>
             <label htmlFor="modelSelect">{t.modelLabel}</label>
-            <select id="modelSelect" value={selectedModel} onChange={e => setSelectedModel(e.target.value)} style={selectStyle}>
-              <option value="gemini-2.5-flash">Gemini 2.5 Flash {lang === 'ja' ? '(推奨・最新)' : '(Recommended)'}</option>
-              <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
-              <option value="gemini-2.5-pro">Gemini 2.5 Pro {lang === 'ja' ? '(高性能)' : '(High Capability)'}</option>
-              <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
-            </select>
+            {provider === 'vertex' ? (
+              <select id="modelSelect" value={vertexModel} onChange={e => setVertexModel(e.target.value)} style={selectStyle}>
+                <option value="gemini-2.5-flash">Gemini 2.5 Flash {lang === 'ja' ? '(推奨)' : '(Rec.)'}</option>
+                <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+                <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+                <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+              </select>
+            ) : (
+              <select id="modelSelect" value={openaiModel} onChange={e => setOpenaiModel(e.target.value)} style={selectStyle}>
+                <option value="gpt-4o-mini">gpt-4o-mini {lang === 'ja' ? '(推奨・高速)' : '(Rec. / Fast)'}</option>
+                <option value="gpt-4o">gpt-4o {lang === 'ja' ? '(高性能)' : '(High Capability)'}</option>
+                <option value="o1-mini">o1-mini</option>
+              </select>
+            )}
           </div>
+
           <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
+            <button className="btn-secondary" onClick={handleClearSettings}>{t.clearKey}</button>
             <button
-              className="btn-primary" onClick={handleSaveApiKey} disabled={isValidating}
+              className="btn-primary" onClick={handleSaveSettings} disabled={isValidating}
               style={{ width: 'auto', padding: '0.7rem 1.5rem' }}
             >
               {isValidating ? (<><div className="spinner" style={{ width: '16px', height: '16px' }} />{t.verifying}</>) : t.verifyBtn}
@@ -421,7 +528,7 @@ function App() {
         <div className="api-key-banner">
           <div className="api-key-status">
             <div className={`api-key-indicator ${isKeyValid ? 'valid' : 'invalid'}`} />
-            <span>{t.connectedStatus}</span>
+            <span>{t.connectedStatus(provider)}</span>
           </div>
           <button className="btn-secondary" onClick={() => setShowSettings(true)}>
             <Settings size={14} style={{ marginRight: '0.4rem' }} />{t.settingsBtn}
@@ -470,13 +577,15 @@ function App() {
             <div className="toggle-group">
               <div className="toggle-info">
                 <span className="toggle-label">{t.webSearchLabel}</span>
-                <span className="toggle-desc">{t.webSearchDesc}</span>
+                <span className="toggle-desc">
+                  {provider === 'openai' ? t.webSearchOpenAINote : t.webSearchDesc}
+                </span>
               </div>
               <label className="switch">
                 <input
-                  type="checkbox" checked={useWebSearch}
+                  type="checkbox" checked={provider === 'openai' ? false : useWebSearch}
                   onChange={() => pipelineStatus !== 'running' && setUseWebSearch(!useWebSearch)}
-                  disabled={pipelineStatus === 'running'}
+                  disabled={pipelineStatus === 'running' || provider === 'openai'}
                 />
                 <span className="slider" />
               </label>

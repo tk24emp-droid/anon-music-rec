@@ -16,6 +16,38 @@ const LOCATION = 'us-central1'; // us-central1 is default for Vertex AI models
 const vertexAI = new VertexAI({ project: PROJECT_ID, location: LOCATION });
 
 /**
+ * Helper to call OpenAI Chat Completions API using global fetch
+ */
+async function callOpenAI(apiKey, model, messages, responseFormat = null) {
+  const headers = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${apiKey}`
+  };
+  const body = {
+    model: model || 'gpt-4o-mini',
+    messages: messages,
+    temperature: 0.7
+  };
+  if (responseFormat) {
+    body.response_format = responseFormat;
+  }
+
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body)
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(`OpenAI API error: ${res.status} - ${errorText}`);
+  }
+
+  const data = await res.json();
+  return data.choices[0].message.content;
+}
+
+/**
  * Maps standard short model names to Vertex AI specific model IDs
  */
 function mapModelName(modelName) {
@@ -35,24 +67,37 @@ function mapModelName(modelName) {
 
 // 1. API connection / validation route
 app.post('/api/validate', async (req, res) => {
-  const { modelName } = req.body;
-  const targetModel = mapModelName(modelName || 'gemini-2.5-flash');
+  const { provider, modelName, apiKey } = req.body;
   
-  try {
-    const generativeModel = vertexAI.getGenerativeModel({ model: targetModel });
-    const result = await generativeModel.generateContent('Connection test');
-    const text = result.response.candidates[0].content.parts[0].text;
-    res.json({ success: true, message: 'Vertex AI connection verified!', text });
-  } catch (error) {
-    console.error('Vertex AI Validation Error:', error);
-    res.status(500).json({ success: false, error: error.message });
+  if (provider === 'openai') {
+    try {
+      if (!apiKey || apiKey === 'vertex-ai-mode') {
+        return res.status(400).json({ success: false, error: 'OpenAIのAPIキーを入力してください。' });
+      }
+      const testMsg = [{ role: 'user', content: 'Connection test' }];
+      const text = await callOpenAI(apiKey, modelName || 'gpt-4o-mini', testMsg);
+      res.json({ success: true, message: 'OpenAI connection verified!', text });
+    } catch (error) {
+      console.error('OpenAI Validation Error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  } else {
+    const targetModel = mapModelName(modelName || 'gemini-2.5-flash');
+    try {
+      const generativeModel = vertexAI.getGenerativeModel({ model: targetModel });
+      const result = await generativeModel.generateContent('Connection test');
+      const text = result.response.candidates[0].content.parts[0].text;
+      res.json({ success: true, message: 'Vertex AI connection verified!', text });
+    } catch (error) {
+      console.error('Vertex AI Validation Error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
   }
 });
 
 // 2. LLM 1: Extract Anonymous Description
 app.post('/api/extract', async (req, res) => {
-  const { input, filters, emphasize, useWebSearch, modelName, lang } = req.body;
-  const targetModel = mapModelName(modelName || 'gemini-2.5-flash');
+  const { provider, apiKey, input, filters, emphasize, useWebSearch, modelName, lang } = req.body;
   const isEn = lang === 'en';
 
   // Build constraints
@@ -140,24 +185,38 @@ ${attributeEmphases || '特になし'}
 
 特徴のみを簡潔な箇条書きで出力してください。導入文や結論、あいさつは不要です。`;
 
-  const modelConfig = { model: targetModel };
-  if (useWebSearch) modelConfig.tools = [{ googleSearch: {} }];
+  if (provider === 'openai') {
+    try {
+      if (!apiKey || apiKey === 'vertex-ai-mode') {
+        throw new Error('OpenAIのAPIキーが設定されていません。');
+      }
+      const messages = [{ role: 'user', content: prompt }];
+      const text = await callOpenAI(apiKey, modelName || 'gpt-4o-mini', messages);
+      res.json({ text });
+    } catch (error) {
+      console.error('OpenAI Extract Error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  } else {
+    const targetModel = mapModelName(modelName || 'gemini-2.5-flash');
+    const modelConfig = { model: targetModel };
+    if (useWebSearch) modelConfig.tools = [{ googleSearch: {} }];
 
-  try {
-    const generativeModel = vertexAI.getGenerativeModel(modelConfig);
-    const result = await generativeModel.generateContent(prompt);
-    const text = result.response.candidates[0].content.parts[0].text;
-    res.json({ text });
-  } catch (error) {
-    console.error('Vertex AI Extract Error:', error);
-    res.status(500).json({ error: error.message });
+    try {
+      const generativeModel = vertexAI.getGenerativeModel(modelConfig);
+      const result = await generativeModel.generateContent(prompt);
+      const text = result.response.candidates[0].content.parts[0].text;
+      res.json({ text });
+    } catch (error) {
+      console.error('Vertex AI Extract Error:', error);
+      res.status(500).json({ error: error.message });
+    }
   }
 });
 
 // 3. LLM 2: Predict Songs From Features
 app.post('/api/predict', async (req, res) => {
-  const { description, recommendCount, useWebSearch, modelName, lang } = req.body;
-  const targetModel = mapModelName(modelName || 'gemini-2.5-flash');
+  const { provider, apiKey, description, recommendCount, useWebSearch, modelName, lang } = req.body;
   const count = recommendCount || 5;
   const isEn = lang === 'en';
 
@@ -201,70 +260,79 @@ ${description}
   }
 ]`;
 
-  const modelConfig = {
-    model: targetModel,
-    // Note: responseMimeType is not specified here because it conflicts with the Search tool.
-    // Instead, we will parse the JSON from raw text output.
-  };
-
-  // Google Search Grounding config.
-  if (useWebSearch) {
-    modelConfig.tools = [{ googleSearch: {} }];
+  let text;
+  if (provider === 'openai') {
+    try {
+      if (!apiKey || apiKey === 'vertex-ai-mode') {
+        throw new Error('OpenAIのAPIキーが設定されていません。');
+      }
+      const messages = [{ role: 'user', content: prompt }];
+      text = await callOpenAI(apiKey, modelName || 'gpt-4o-mini', messages, { type: "json_object" });
+    } catch (error) {
+      console.error('OpenAI Predict Error:', error);
+      return res.status(500).json({ error: error.message });
+    }
+  } else {
+    const targetModel = mapModelName(modelName || 'gemini-2.5-flash');
+    const modelConfig = {
+      model: targetModel,
+    };
+    if (useWebSearch) {
+      modelConfig.tools = [{ googleSearch: {} }];
+    }
+    try {
+      const generativeModel = vertexAI.getGenerativeModel(modelConfig);
+      const result = await generativeModel.generateContent(prompt);
+      text = result.response.candidates[0].content.parts[0].text;
+    } catch (error) {
+      console.error('Vertex AI Predict Error:', error);
+      return res.status(500).json({ error: error.message });
+    }
   }
 
+  // Parse the output as JSON (Robust parser)
+  let parsedJson;
+  let rawText = text.trim();
+  
   try {
-    const generativeModel = vertexAI.getGenerativeModel(modelConfig);
-    const result = await generativeModel.generateContent(prompt);
-    const text = result.response.candidates[0].content.parts[0].text;
-    
-    // Parse the output as JSON (Robust parser)
-    let parsedJson;
-    let rawText = text.trim();
+    // 1. Try standard parse
+    parsedJson = JSON.parse(rawText);
+  } catch (e) {
+    console.log("Standard JSON parsing failed, attempting text cleaning...");
+    // 2. Remove markdown code blocks if present
+    if (rawText.startsWith("```")) {
+      rawText = rawText.replace(/^```json\s*/i, "").replace(/```$/, "").trim();
+    }
     
     try {
-      // 1. Try standard parse
       parsedJson = JSON.parse(rawText);
-    } catch (e) {
-      console.log("Standard JSON parsing failed, attempting text cleaning...");
-      // 2. Remove markdown code blocks if present
-      if (rawText.startsWith("```")) {
-        rawText = rawText.replace(/^```json\s*/i, "").replace(/```$/, "").trim();
-      }
-      
-      try {
-        parsedJson = JSON.parse(rawText);
-      } catch (e2) {
-        console.log("Cleaned JSON parsing failed, attempting bracket extraction...");
-        // 3. Extract content between first '[' and last ']'
-        const startIdx = rawText.indexOf('[');
-        const endIdx = rawText.lastIndexOf(']');
-        if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
-          rawText = rawText.substring(startIdx, endIdx + 1);
-          try {
-            parsedJson = JSON.parse(rawText);
-          } catch (e3) {
-            console.error("Bracket extraction parsing failed:", e3);
-            throw new Error("AIの応答からJSONを抽出できませんでした。生成テキスト: " + text);
-          }
-        } else {
-          throw new Error("AIの応答にJSONの配列が含まれていません。生成テキスト: " + text);
+    } catch (e2) {
+      console.log("Cleaned JSON parsing failed, attempting bracket extraction...");
+      // 3. Extract content between first '[' and last ']'
+      const startIdx = rawText.indexOf('[');
+      const endIdx = rawText.lastIndexOf(']');
+      if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+        rawText = rawText.substring(startIdx, endIdx + 1);
+        try {
+          parsedJson = JSON.parse(rawText);
+        } catch (e3) {
+          console.error("Bracket extraction parsing failed:", e3);
+          return res.status(500).json({ error: "AIの応答からJSONを抽出できませんでした。生成テキスト: " + text });
         }
+      } else {
+        return res.status(500).json({ error: "AIの応答にJSONの配列が含まれていません。生成テキスト: " + text });
       }
     }
-    res.json(parsedJson);
-  } catch (error) {
-    console.error('Vertex AI Predict Error:', error);
-    res.status(500).json({ error: error.message });
   }
+  res.json(parsedJson);
 });
 
 // 4. LLM 3: Verify and Filter
 app.post('/api/verify', async (req, res) => {
-  const { originalInput, prediction, modelName } = req.body;
-  const targetModel = mapModelName(modelName || 'gemini-2.5-flash');
+  const { provider, apiKey, originalInput, prediction, modelName } = req.body;
 
   const prompt = `あなたはフィルタリングシステムです。
-推薦された曲が、ユーザーが最初に入力した「元ネタ（元の曲やアーティスト）」と同一、または非常に密接に関連している（同じアーティストの別の曲など）かを判定してください。
+推薦された曲が、ユーザーが最初に入力した「元ネタ（元の曲やアーティスト）」と同一, または非常に密接に関連している（同じアーティストの別の曲など）かを判定してください。
 目的は、元ネタそのものや、元ネタのアーティストの曲を「推薦から排除する」ことです。
 
 【元ネタの入力】
@@ -288,23 +356,38 @@ app.post('/api/verify', async (req, res) => {
 }
 `;
 
-  try {
-    const generativeModel = vertexAI.getGenerativeModel({
-      model: targetModel,
-      generationConfig: {
-        responseMimeType: "application/json",
+  if (provider === 'openai') {
+    try {
+      if (!apiKey || apiKey === 'vertex-ai-mode') {
+        throw new Error('OpenAIのAPIキーが設定されていません。');
       }
-    });
-    const result = await generativeModel.generateContent(prompt);
-    const text = result.response.candidates[0].content.parts[0].text;
-    res.json(JSON.parse(text));
-  } catch (error) {
-    console.error('Vertex AI Verify Error:', error);
-    // Fallback on error: let it pass but log it
-    res.json({ isTooClose: false, reason: "検証エラーのため通過させました。" });
+      const messages = [{ role: 'user', content: prompt }];
+      const text = await callOpenAI(apiKey, modelName || 'gpt-4o-mini', messages, { type: "json_object" });
+      res.json(JSON.parse(text));
+    } catch (error) {
+      console.error('OpenAI Verify Error:', error);
+      res.json({ isTooClose: false, reason: "検証エラーのため通過させました。" });
+    }
+  } else {
+    const targetModel = mapModelName(modelName || 'gemini-2.5-flash');
+    try {
+      const generativeModel = vertexAI.getGenerativeModel({
+        model: targetModel,
+        generationConfig: {
+          responseMimeType: "application/json",
+        }
+      });
+      const result = await generativeModel.generateContent(prompt);
+      const text = result.response.candidates[0].content.parts[0].text;
+      res.json(JSON.parse(text));
+    } catch (error) {
+      console.error('Vertex AI Verify Error:', error);
+      // Fallback on error: let it pass but log it
+      res.json({ isTooClose: false, reason: "検証エラーのため通過させました。" });
+    }
   }
 });
 
 app.listen(PORT, () => {
-  console.log(`Vertex AI Proxy Server running on port ${PORT}`);
+  console.log(`Vertex AI / OpenAI Proxy Server running on port ${PORT}`);
 });
