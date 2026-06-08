@@ -1,6 +1,12 @@
 import express from 'express';
 import cors from 'cors';
 import { VertexAI } from '@google-cloud/vertexai';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+// Define __dirname in ES module
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -8,8 +14,8 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
-// GCP Project configuration
-const PROJECT_ID = 'paisel-claude-vertex';
+// GCP Project configuration (Read dynamically in cloud environment)
+const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT || 'paisel-claude-vertex';
 const LOCATION = 'us-central1'; // us-central1 is default for Vertex AI models
 
 // Initialize Vertex AI
@@ -386,6 +392,14 @@ app.post('/api/verify', async (req, res) => {
       res.json({ isTooClose: false, reason: "検証エラーのため通過させました。" });
     }
   }
+});
+
+// Serve Vite static build assets
+app.use(express.static(path.join(__dirname, 'dist')));
+
+// Fallback all non-API GET requests to Vite index.html (SPA routing)
+app.get(/(.*)/, (req, res) => {
+  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
 app.listen(PORT, () => {
